@@ -2,25 +2,62 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: v1.0.0
+  FLUTTER_VERSION_NAME: 1.0.0
+  FLUTTER_VERSION_CODE: 1
+
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_tag: ${{ steps.release_meta.outputs.release_tag }}
+      version_name: ${{ steps.release_meta.outputs.version_name }}
+      version_code: ${{ steps.release_meta.outputs.version_code }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set release metadata
+        id: release_meta
+        run: |
+          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version_name=${FLUTTER_VERSION_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "version_code=${FLUTTER_VERSION_CODE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create or update release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}"
+          git push origin "${RELEASE_TAG}" --force
+
   build-android:
+    needs: prepare-release
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.release_tag }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -31,20 +68,26 @@ jobs:
         run: flutter pub get
 
       - name: Build Android APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-name=${{ needs.prepare-release.outputs.version_name }} --build-number=${{ needs.prepare-release.outputs.version_code }}
+
+      - name: Rename Android artifact
+        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/droid-bridge-android-${{ needs.prepare-release.outputs.release_tag }}.apk
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
-          name: droid-bridge-android-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: droid-bridge-android-${{ needs.prepare-release.outputs.release_tag }}
+          path: build/app/outputs/flutter-apk/droid-bridge-android-${{ needs.prepare-release.outputs.release_tag }}.apk
 
   build-macos:
+    needs: prepare-release
     runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.release_tag }}
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -55,19 +98,20 @@ jobs:
         run: flutter pub get
 
       - name: Build macOS app
-        run: flutter build macos --release --no-codesign
+        run: flutter build macos --release --no-codesign --build-name=${{ needs.prepare-release.outputs.version_name }} --build-number=${{ needs.prepare-release.outputs.version_code }}
 
       - name: Zip macOS app
-        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/droid_bridge.app build/macos/Build/Products/Release/droid_bridge-macos.zip
+        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/droid_bridge.app build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: droid-bridge-macos-app
-          path: build/macos/Build/Products/Release/droid_bridge-macos.zip
+          name: droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}
+          path: build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
 
   publish-release:
     needs:
+      - prepare-release
       - build-android
       - build-macos
     runs-on: ubuntu-latest
@@ -76,18 +120,22 @@ jobs:
       - name: Download Android artifact
         uses: actions/download-artifact@v4
         with:
-          name: droid-bridge-android-apk
+          name: droid-bridge-android-${{ needs.prepare-release.outputs.release_tag }}
           path: release-assets
 
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
-          name: droid-bridge-macos-app
+          name: droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}
           path: release-assets
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare-release.outputs.release_tag }}
+          name: Droid Bridge ${{ needs.prepare-release.outputs.release_tag }}
+          generate_release_notes: true
+          make_latest: true
           files: |
-            release-assets/app-release.apk
-            release-assets/droid_bridge-macos.zip
+            release-assets/droid-bridge-android-${{ needs.prepare-release.outputs.release_tag }}.apk
+            release-assets/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip

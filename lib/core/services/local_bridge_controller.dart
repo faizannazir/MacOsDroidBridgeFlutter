@@ -87,21 +87,30 @@ class LocalBridgeController extends ChangeNotifier {
       return;
     }
 
+    final peerAddress = _parsePeerAddress(normalizedHost);
+    if (peerAddress == null) {
+      errorMessage =
+          'Enter a valid peer address like 192.168.1.22 or 192.168.1.22:45454.';
+      notifyListeners();
+      return;
+    }
+
     isConnecting = true;
     errorMessage = null;
-    statusLine = 'Connecting to $normalizedHost...';
+    statusLine = 'Connecting to ${peerAddress.host}:${peerAddress.port}...';
     notifyListeners();
 
     try {
       final socket = await WebSocket.connect(
-        'ws://$normalizedHost:$port/ws?code=$normalizedCode',
+        'ws://${peerAddress.host}:${peerAddress.port}/ws?code=$normalizedCode',
       );
       _bindSocket(
         socket,
-        hostOverride: normalizedHost,
+        hostOverride: peerAddress.host,
+        portOverride: peerAddress.port,
         remoteCodeHint: normalizedCode,
       );
-      statusLine = 'Connected to $normalizedHost';
+      statusLine = 'Connected to ${peerAddress.host}:${peerAddress.port}';
     } catch (error) {
       errorMessage = 'Connection failed: $error';
       statusLine = 'Unable to connect';
@@ -257,7 +266,7 @@ class LocalBridgeController extends ChangeNotifier {
       final client = HttpClient();
       final request = await client.post(
         peer.host,
-        port,
+        peer.port,
         '/upload?code=${Uri.encodeQueryComponent(peer.pairingCode)}',
       );
       request.headers.contentType = ContentType.binary;
@@ -338,7 +347,11 @@ class LocalBridgeController extends ChangeNotifier {
 
       final socket = await WebSocketTransformer.upgrade(request);
       final host = request.connectionInfo?.remoteAddress.address ?? 'peer';
-      _bindSocket(socket, hostOverride: host);
+      _bindSocket(
+        socket,
+        hostOverride: host,
+        portOverride: port,
+      );
       statusLine = 'Peer connected from $host';
       notifyListeners();
       return;
@@ -409,6 +422,7 @@ class LocalBridgeController extends ChangeNotifier {
   void _bindSocket(
     WebSocket socket, {
     required String hostOverride,
+    required int portOverride,
     String? remoteCodeHint,
   }) {
     unawaited(_socket?.close());
@@ -417,6 +431,7 @@ class LocalBridgeController extends ChangeNotifier {
       name: 'Connected peer',
       role: 'companion',
       host: hostOverride,
+      port: portOverride,
       pairingCode: remoteCodeHint ?? connectedPeer?.pairingCode ?? '',
       capabilities: const <String>[],
     );
@@ -457,6 +472,7 @@ class LocalBridgeController extends ChangeNotifier {
             name: payload['deviceName'] as String? ?? 'Connected peer',
             role: payload['platformRole'] as String? ?? 'companion',
             host: existing?.host ?? 'peer',
+            port: existing?.port ?? port,
             pairingCode: payload['pairingCode'] as String? ??
                 existing?.pairingCode ??
                 '',
@@ -528,6 +544,25 @@ class LocalBridgeController extends ChangeNotifier {
     return input.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
   }
 
+  static _PeerAddress? _parsePeerAddress(String input) {
+    final value = input.trim();
+    if (value.isEmpty) {
+      return null;
+    }
+
+    final uri = Uri.tryParse('ws://$value');
+    if (uri == null || uri.host.isEmpty) {
+      return null;
+    }
+
+    final resolvedPort = uri.hasPort ? uri.port : _defaultPort;
+    if (resolvedPort <= 0) {
+      return null;
+    }
+
+    return _PeerAddress(uri.host, resolvedPort);
+  }
+
   static String _uniqueFileName(String directoryPath, String fileName) {
     final dot = fileName.lastIndexOf('.');
     final stem = dot == -1 ? fileName : fileName.substring(0, dot);
@@ -542,4 +577,11 @@ class LocalBridgeController extends ChangeNotifier {
 
     return candidate;
   }
+}
+
+class _PeerAddress {
+  const _PeerAddress(this.host, this.port);
+
+  final String host;
+  final int port;
 }

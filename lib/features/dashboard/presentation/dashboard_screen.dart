@@ -257,8 +257,8 @@ class _ConnectionCard extends StatelessWidget {
             TextField(
               controller: hostController,
               decoration: const InputDecoration(
-                labelText: 'Peer IP address',
-                hintText: '192.168.1.22',
+                labelText: 'Peer IP address or endpoint',
+                hintText: '192.168.1.22 or 192.168.1.22:45454',
               ),
             ),
             const SizedBox(height: 12),
@@ -305,7 +305,7 @@ class _ConnectionCard extends StatelessWidget {
             Text(
               peer == null
                   ? 'Once paired, this device can send clipboard text, short notes, and files.'
-                  : '${peer.name} at ${peer.host}',
+                  : '${peer.name} at ${peer.host}:${peer.port}',
             ),
             if (peer != null && peer.capabilities.isNotEmpty) ...[
               const SizedBox(height: 10),
