@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:droid_bridge/core/models/connection_request.dart';
+import 'package:droid_bridge/core/models/discovered_device.dart';
 import 'package:droid_bridge/core/models/peer_device.dart';
 import 'package:droid_bridge/core/models/mirroring_status.dart';
 import 'package:droid_bridge/core/models/platform_snapshot.dart';
@@ -22,15 +24,22 @@ class LocalBridgeController extends ChangeNotifier {
             platformBridgeService ?? PlatformBridgeService();
 
   static const int _defaultPort = 45454;
+  static const int _discoveryPort = 45455;
 
   final PlatformBridgeService _platformBridgeService;
   final List<ShareNote> notes = <ShareNote>[];
   final List<TransferRecord> transfers = <TransferRecord>[];
   final List<String> localAddresses = <String>[];
+  final List<DiscoveredDevice> discoveredDevices = <DiscoveredDevice>[];
+  final List<ConnectionRequest> incomingConnectionRequests =
+      <ConnectionRequest>[];
+  final Set<String> outgoingConnectionRequestHosts = <String>{};
 
   PlatformSnapshot? snapshot;
   HttpServer? _server;
+  RawDatagramSocket? _discoverySocket;
   WebSocket? _socket;
+  Timer? _discoveryAnnouncementTimer;
   PeerDevice? connectedPeer;
   String pairingCode = _generatePairingCode();
   String statusLine = 'Starting local bridge...';
@@ -65,6 +74,7 @@ class LocalBridgeController extends ChangeNotifier {
       mirroringStatus = await _platformBridgeService.loadMirroringStatus();
       await _startServer();
       await _loadLocalAddresses();
+      await _startDiscovery();
       statusLine = 'Ready to pair';
       isReady = true;
     } catch (error) {
@@ -302,6 +312,8 @@ class LocalBridgeController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _discoveryAnnouncementTimer?.cancel();
+    _discoverySocket?.close();
     unawaited(_socket?.close());
     unawaited(_server?.close(force: true));
     super.dispose();
@@ -332,6 +344,38 @@ class LocalBridgeController extends ChangeNotifier {
             .map((address) => address.address)
             .where((address) => !address.startsWith('169.254.')),
       );
+  }
+
+  Future<void> _startDiscovery() async {
+    _discoverySocket = await RawDatagramSocket.bind(
+      InternetAddress.anyIPv4,
+      _discoveryPort,
+      reuseAddress: true,
+      reusePort: true,
+    );
+    _discoverySocket!
+      ..broadcastEnabled = true
+      ..readEventsEnabled = true
+      ..writeEventsEnabled = false;
+
+    _discoverySocket!.listen((event) {
+      if (event != RawSocketEvent.read) {
+        return;
+      }
+
+      final datagram = _discoverySocket!.receive();
+      if (datagram == null) {
+        return;
+      }
+
+      _handleDiscoveryDatagram(datagram);
+    });
+
+    await _announcePresence();
+    _discoveryAnnouncementTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_announcePresence()),
+    );
   }
 
   Future<void> _handleRequest(HttpRequest request) async {
@@ -417,6 +461,73 @@ class LocalBridgeController extends ChangeNotifier {
 
     request.response.statusCode = HttpStatus.notFound;
     await request.response.close();
+  }
+
+  void useDiscoveredDevice(DiscoveredDevice device) {
+    errorMessage = null;
+    statusLine = 'Loaded ${device.name} from nearby discovery.';
+    notifyListeners();
+  }
+
+  Future<void> sendConnectionRequest(DiscoveredDevice device) async {
+    errorMessage = null;
+    outgoingConnectionRequestHosts.add(device.host);
+    statusLine = 'Sent connection request to ${device.name}.';
+    notifyListeners();
+
+    await _sendDiscoveryPayload(
+      <String, Object?>{
+        'type': 'connection_request',
+        'deviceName': localDeviceName,
+        'platformRole': snapshot?.platformRole ?? 'companion',
+        'pairingCode': pairingCode,
+        'port': port,
+      },
+      targetHost: device.host,
+    );
+  }
+
+  Future<void> acceptConnectionRequest(ConnectionRequest request) async {
+    incomingConnectionRequests.removeWhere(
+      (entry) => entry.host == request.host,
+    );
+    statusLine = 'Accepted ${request.deviceName}. Connecting...';
+    notifyListeners();
+
+    await _sendDiscoveryPayload(
+      <String, Object?>{
+        'type': 'connection_response',
+        'status': 'accepted',
+        'deviceName': localDeviceName,
+        'platformRole': snapshot?.platformRole ?? 'companion',
+        'pairingCode': pairingCode,
+        'port': port,
+      },
+      targetHost: request.host,
+    );
+
+    await connectToPeer(
+      host: '${request.host}:${request.port}',
+      remoteCode: request.pairingCode,
+    );
+  }
+
+  Future<void> declineConnectionRequest(ConnectionRequest request) async {
+    incomingConnectionRequests.removeWhere(
+      (entry) => entry.host == request.host,
+    );
+    statusLine = 'Declined ${request.deviceName}.';
+    notifyListeners();
+
+    await _sendDiscoveryPayload(
+      <String, Object?>{
+        'type': 'connection_response',
+        'status': 'declined',
+        'deviceName': localDeviceName,
+        'platformRole': snapshot?.platformRole ?? 'companion',
+      },
+      targetHost: request.host,
+    );
   }
 
   void _bindSocket(
@@ -520,6 +631,119 @@ class LocalBridgeController extends ChangeNotifier {
 
   void _sendJson(Map<String, Object?> payload) {
     _socket?.add(jsonEncode(payload));
+  }
+
+  Future<void> _announcePresence() async {
+    await _sendDiscoveryPayload(
+      <String, Object?>{
+        'type': 'bridge_hello',
+        'deviceName': localDeviceName,
+        'platformRole': snapshot?.platformRole ?? 'companion',
+        'pairingCode': pairingCode,
+        'port': port,
+        'capabilities': snapshot?.capabilities ?? const <String>[],
+      },
+    );
+  }
+
+  void _handleDiscoveryDatagram(Datagram datagram) {
+    try {
+      final payload =
+          jsonDecode(utf8.decode(datagram.data)) as Map<String, dynamic>;
+      final host = datagram.address.address;
+      if (localAddresses.contains(host)) {
+        return;
+      }
+      switch (payload['type']) {
+        case 'bridge_hello':
+          final discoveredDevice = DiscoveredDevice(
+            name: payload['deviceName'] as String? ?? 'Nearby device',
+            role: payload['platformRole'] as String? ?? 'companion',
+            host: host,
+            port: payload['port'] as int? ?? port,
+            pairingCode: payload['pairingCode'] as String? ?? '',
+            capabilities: (payload['capabilities'] as List<dynamic>? ?? const [])
+                .map((entry) => entry.toString())
+                .toList(),
+            lastSeen: DateTime.now(),
+          );
+
+          final existingIndex = discoveredDevices.indexWhere(
+            (device) => device.host == discoveredDevice.host,
+          );
+          if (existingIndex == -1) {
+            discoveredDevices.insert(0, discoveredDevice);
+          } else {
+            discoveredDevices[existingIndex] = discoveredDevice;
+          }
+
+          discoveredDevices.sort(
+            (left, right) => right.lastSeen.compareTo(left.lastSeen),
+          );
+          notifyListeners();
+          break;
+        case 'connection_request':
+          final request = ConnectionRequest(
+            deviceName: payload['deviceName'] as String? ?? 'Nearby device',
+            role: payload['platformRole'] as String? ?? 'companion',
+            host: host,
+            port: payload['port'] as int? ?? port,
+            pairingCode: payload['pairingCode'] as String? ?? '',
+            createdAt: DateTime.now(),
+          );
+          final existingIndex = incomingConnectionRequests.indexWhere(
+            (entry) => entry.host == request.host,
+          );
+          if (existingIndex == -1) {
+            incomingConnectionRequests.insert(0, request);
+          } else {
+            incomingConnectionRequests[existingIndex] = request;
+          }
+          statusLine = '${request.deviceName} wants to connect.';
+          notifyListeners();
+          break;
+        case 'connection_response':
+          outgoingConnectionRequestHosts.remove(host);
+          final responseStatus = payload['status'] as String? ?? 'unknown';
+          final responderName =
+              payload['deviceName'] as String? ?? 'Nearby device';
+          if (responseStatus == 'accepted') {
+            statusLine = '$responderName accepted the request. Connecting...';
+            notifyListeners();
+            unawaited(
+              connectToPeer(
+                host: '$host:${payload['port'] as int? ?? port}',
+                remoteCode: payload['pairingCode'] as String? ?? '',
+              ),
+            );
+          } else {
+            statusLine = '$responderName declined the request.';
+            notifyListeners();
+          }
+          break;
+      }
+    } catch (_) {
+      // Ignore malformed discovery packets from the local network.
+    }
+  }
+
+  Future<void> _sendDiscoveryPayload(
+    Map<String, Object?> payload, {
+    String? targetHost,
+  }) async {
+    final socket = _discoverySocket;
+    if (socket == null) {
+      return;
+    }
+
+    final bytes = utf8.encode(jsonEncode(payload));
+    socket.send(
+      bytes,
+      targetHost == null
+          ? InternetAddress('255.255.255.255')
+          : InternetAddress(targetHost),
+      _discoveryPort,
+    );
   }
 
   Future<Directory> _receivedDirectory() async {

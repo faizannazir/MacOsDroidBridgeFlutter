@@ -1,4 +1,6 @@
 import 'package:droid_bridge/core/models/bridge_feature.dart';
+import 'package:droid_bridge/core/models/connection_request.dart';
+import 'package:droid_bridge/core/models/discovered_device.dart';
 import 'package:droid_bridge/core/models/share_note.dart';
 import 'package:droid_bridge/core/models/transfer_record.dart';
 import 'package:droid_bridge/core/services/feature_catalog.dart';
@@ -71,6 +73,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 controller: _controller,
                                 hostController: _hostController,
                                 codeController: _codeController,
+                                onUseDiscoveredDevice: _useDiscoveredDevice,
+                                onRequestDiscoveredDevice: _requestDiscoveredDevice,
                               ),
                             ),
                             const SizedBox(width: 16),
@@ -90,6 +94,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             controller: _controller,
                             hostController: _hostController,
                             codeController: _codeController,
+                            onUseDiscoveredDevice: _useDiscoveredDevice,
+                            onRequestDiscoveredDevice: _requestDiscoveredDevice,
                           ),
                           const SizedBox(height: 16),
                           _ActionsCard(
@@ -135,6 +141,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
+  }
+
+  void _useDiscoveredDevice(DiscoveredDevice device) {
+    _hostController.text = '${device.host}:${device.port}';
+    _codeController.text = device.pairingCode;
+    _controller.useDiscoveredDevice(device);
+  }
+
+  void _requestDiscoveredDevice(DiscoveredDevice device) {
+    _controller.sendConnectionRequest(device);
   }
 }
 
@@ -211,11 +227,15 @@ class _ConnectionCard extends StatelessWidget {
     required this.controller,
     required this.hostController,
     required this.codeController,
+    required this.onUseDiscoveredDevice,
+    required this.onRequestDiscoveredDevice,
   });
 
   final LocalBridgeController controller;
   final TextEditingController hostController;
   final TextEditingController codeController;
+  final ValueChanged<DiscoveredDevice> onUseDiscoveredDevice;
+  final ValueChanged<DiscoveredDevice> onRequestDiscoveredDevice;
 
   @override
   Widget build(BuildContext context) {
@@ -253,6 +273,46 @@ class _ConnectionCard extends StatelessWidget {
                   const Chip(label: Text('Waiting for network interface')),
               ],
             ),
+            const SizedBox(height: 18),
+            Text(
+              'Nearby devices',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (controller.discoveredDevices.isEmpty)
+              const Text('No nearby devices discovered yet. Keep both apps open on the same Wi-Fi.')
+            else
+              for (final device in controller.discoveredDevices.take(5)) ...[
+                _NearbyDeviceTile(
+                  device: device,
+                  onUse: () => onUseDiscoveredDevice(device),
+                  onRequest: () => onRequestDiscoveredDevice(device),
+                  requestSent: controller.outgoingConnectionRequestHosts
+                      .contains(device.host),
+                ),
+                const SizedBox(height: 10),
+              ],
+            const SizedBox(height: 18),
+            Text(
+              'Incoming requests',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (controller.incomingConnectionRequests.isEmpty)
+              const Text('No incoming connection requests.')
+            else
+              for (final request in controller.incomingConnectionRequests.take(5)) ...[
+                _IncomingRequestTile(
+                  request: request,
+                  onAccept: () => controller.acceptConnectionRequest(request),
+                  onDecline: () => controller.declineConnectionRequest(request),
+                ),
+                const SizedBox(height: 10),
+              ],
             const SizedBox(height: 18),
             TextField(
               controller: hostController,
@@ -756,6 +816,124 @@ class _Pill extends StatelessWidget {
           color: color,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+}
+
+class _NearbyDeviceTile extends StatelessWidget {
+  const _NearbyDeviceTile({
+    required this.device,
+    required this.onUse,
+    required this.onRequest,
+    required this.requestSent,
+  });
+
+  final DiscoveredDevice device;
+  final VoidCallback onUse;
+  final VoidCallback onRequest;
+  final bool requestSent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  device.name,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text('${device.host}:${device.port}'),
+                const SizedBox(height: 4),
+                Text('Code ${device.pairingCode}'),
+              ],
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: onUse,
+                child: const Text('Use'),
+              ),
+              FilledButton(
+                onPressed: requestSent ? null : onRequest,
+                child: Text(requestSent ? 'Requested' : 'Request'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _IncomingRequestTile extends StatelessWidget {
+  const _IncomingRequestTile({
+    required this.request,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  final ConnectionRequest request;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  request.deviceName,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text('${request.host}:${request.port}'),
+                const SizedBox(height: 4),
+                Text('Code ${request.pairingCode}'),
+              ],
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: onDecline,
+                child: const Text('Decline'),
+              ),
+              FilledButton(
+                onPressed: onAccept,
+                child: const Text('Accept'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
