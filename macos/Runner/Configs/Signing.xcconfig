@@ -1,0 +1,9 @@
+// Local macOS signing configuration for personal-use builds.
+//
+// Leave PERSONAL_TEAM_ID blank for ad-hoc local signing, or replace it with
+// your Xcode Personal Team identifier if you want Xcode-managed signing.
+PERSONAL_TEAM_ID =
+DEVELOPMENT_TEAM = $(PERSONAL_TEAM_ID)
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY[sdk=macosx*] = -
+PROVISIONING_PROFILE_SPECIFIER =
