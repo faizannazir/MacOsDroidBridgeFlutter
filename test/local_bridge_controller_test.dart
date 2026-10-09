@@ -19,11 +19,20 @@ void main() {
       expect(controller.isReady, isFalse);
       expect(controller.isConnected, isFalse);
       expect(controller.autoSyncClipboard, isTrue);
+      expect(controller.selectedTransportMode, TransportMode.usbDirect);
 
       await controller.initialize();
 
       expect(controller.isReady, isTrue);
       expect(controller.statusLine, isNotEmpty);
+    });
+
+    test('updates transport mode', () {
+      controller.setTransportMode(TransportMode.localNetwork);
+      expect(controller.selectedTransportMode, TransportMode.localNetwork);
+
+      controller.setTransportMode(TransportMode.wifiP2p);
+      expect(controller.selectedTransportMode, TransportMode.wifiP2p);
     });
 
     test('validates host and pairing code on connectToPeer', () async {

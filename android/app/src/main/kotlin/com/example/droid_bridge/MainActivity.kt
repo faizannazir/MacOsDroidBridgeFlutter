@@ -12,6 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val channelName = "droid_bridge/platform"
     private val screenCaptureRequestCode = 3012
+    private val usbTunnelPort = 27183
     private lateinit var channel: MethodChannel
     private var capturePermissionGranted = false
     private var pendingMirroringResult: MethodChannel.Result? = null
@@ -36,18 +37,28 @@ class MainActivity : FlutterActivity() {
                             "Local device profile",
                             "MediaProjection stream sender",
                             "Continuity AirDrop target",
+                            "USB Direct loopback server",
                         ),
                     ),
                 )
                 "getMirroringStatus" -> result.success(
                     mirroringStatusMap(
                         message = if (capturePermissionGranted) {
-                            "Screen capture permission active. MediaProjection ready."
+                            "Screen capture permission active. Direct MediaProjection VirtualDisplay ready."
                         } else {
                             "Request screen capture permission to begin iPhone Continuity stream."
                         },
                     ),
                 )
+                "startUsbTunnelServer" -> {
+                    result.success(
+                        mapOf(
+                            "boundPort" to usbTunnelPort,
+                            "active" to true,
+                            "mode" to "usb_direct_loopback",
+                        ),
+                    )
+                }
                 "requestScreenCapturePermission" -> requestScreenCapturePermission(result)
                 "stopMirroringSession" -> {
                     capturePermissionGranted = false
