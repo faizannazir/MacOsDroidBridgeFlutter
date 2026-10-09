@@ -17,6 +17,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+enum TransportMode {
+  usbDirect,
+  localNetwork,
+  wifiP2p,
+}
+
 class LocalBridgeController extends ChangeNotifier {
   LocalBridgeController({
     PlatformBridgeService? platformBridgeService,
@@ -25,6 +31,7 @@ class LocalBridgeController extends ChangeNotifier {
 
   static const int _defaultPort = 45454;
   static const int _discoveryPort = 45455;
+  static const int _usbTunnelPort = 27183;
 
   final PlatformBridgeService _platformBridgeService;
   final List<ShareNote> notes = <ShareNote>[];
@@ -50,6 +57,7 @@ class LocalBridgeController extends ChangeNotifier {
   String? errorMessage;
   String? remoteClipboardText;
   bool autoSyncClipboard = true;
+  TransportMode selectedTransportMode = TransportMode.usbDirect;
 
   MirroringStatus mirroringStatus = const MirroringStatus(
     supported: false,
@@ -90,13 +98,46 @@ class LocalBridgeController extends ChangeNotifier {
       await _loadLocalAddresses();
       await _startDiscovery();
       _startClipboardPoller();
-      statusLine = 'Ready for Continuity';
+      statusLine = 'Ready for Continuity (${_transportName(selectedTransportMode)})';
       isReady = true;
     } catch (error) {
       errorMessage = 'Failed to initialize bridge: $error';
       statusLine = 'Initialization warning';
       isReady = true;
     }
+    notifyListeners();
+  }
+
+  void setTransportMode(TransportMode mode) {
+    selectedTransportMode = mode;
+    statusLine = 'Transport mode set to ${_transportName(mode)}';
+    notifyListeners();
+  }
+
+  Future<void> connectViaUsbLoopback() async {
+    isConnecting = true;
+    errorMessage = null;
+    statusLine = 'Connecting via USB direct tunnel (127.0.0.1:$_usbTunnelPort)...';
+    notifyListeners();
+
+    try {
+      final socket = await WebSocket.connect(
+        'ws://127.0.0.1:$_usbTunnelPort/ws?code=$pairingCode',
+      ).timeout(const Duration(seconds: 5));
+
+      _bindSocket(
+        socket,
+        hostOverride: '127.0.0.1 (USB Direct)',
+        portOverride: _usbTunnelPort,
+        remoteCodeHint: pairingCode,
+      );
+      statusLine = 'Connected via Direct USB Cable (No Wi-Fi needed)';
+    } catch (error) {
+      errorMessage = 'USB direct connection failed: $error. Ensure USB cable is attached or ADB reverse is active.';
+      statusLine = 'USB connection pending';
+    }
+
+    isConnecting = false;
     notifyListeners();
   }
 
@@ -486,9 +527,7 @@ class LocalBridgeController extends ChangeNotifier {
         const Duration(seconds: 5),
         (_) => unawaited(_announcePresence()),
       );
-    } catch (_) {
-      // Non-critical background discovery
-    }
+    } catch (_) {}
   }
 
   void _startClipboardPoller() {
@@ -888,6 +927,14 @@ class LocalBridgeController extends ChangeNotifier {
     }
 
     return candidate;
+  }
+
+  static String _transportName(TransportMode mode) {
+    return switch (mode) {
+      TransportMode.usbDirect => 'USB Direct Cable (No Wi-Fi needed)',
+      TransportMode.localNetwork => 'Local Wi-Fi Network',
+      TransportMode.wifiP2p => 'Wi-Fi Direct P2P',
+    };
   }
 }
 

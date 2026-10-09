@@ -495,7 +495,17 @@ class _IPhoneMirroringView extends StatelessWidget {
               style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            // Quick Direct USB Connect button
+            FilledButton.icon(
+              onPressed: controller.isConnecting ? null : controller.connectViaUsbLoopback,
+              icon: const Icon(CupertinoIcons.link),
+              label: const Text('Connect via USB Cable (No Wi-Fi needed)'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF34C759),
+              ),
+            ),
+            const SizedBox(height: 20),
             // Realistic iPhone Frame Mockup
             Container(
               width: 300,
@@ -587,7 +597,7 @@ class _IPhoneMirroringView extends StatelessWidget {
                               Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 24),
                                 child: Text(
-                                  'Pair your phone under Devices tab to begin screen mirroring.',
+                                  'Connect via USB Cable or pair under Devices tab to begin screen mirroring.',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey.shade500,
@@ -772,7 +782,7 @@ class _AirDropView extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Wirelessly drop files between your phone and Mac instantly on local network.',
+          'Wirelessly drop files between your phone and Mac instantly on local network or direct USB.',
           style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
         ),
         const SizedBox(height: 20),
@@ -1168,8 +1178,48 @@ class _DevicesView extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'AirDrop style nearby device discovery and manual IP pairing.',
+          'AirDrop style nearby device discovery, USB direct cable, and manual pairing.',
           style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+        ),
+        const SizedBox(height: 20),
+        // Transport Mode Selector
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Connection Transport Mode',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                SegmentedButton<TransportMode>(
+                  segments: const [
+                    ButtonSegment(
+                      value: TransportMode.usbDirect,
+                      label: Text('USB Direct'),
+                      icon: Icon(CupertinoIcons.link),
+                    ),
+                    ButtonSegment(
+                      value: TransportMode.localNetwork,
+                      label: Text('Local Wi-Fi'),
+                      icon: Icon(CupertinoIcons.wifi),
+                    ),
+                    ButtonSegment(
+                      value: TransportMode.wifiP2p,
+                      label: Text('Wi-Fi Direct'),
+                      icon: Icon(CupertinoIcons.radiowaves_right),
+                    ),
+                  ],
+                  selected: {controller.selectedTransportMode},
+                  onSelectionChanged: (set) {
+                    controller.setTransportMode(set.first);
+                  },
+                ),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 20),
         // Discovered Devices Section
