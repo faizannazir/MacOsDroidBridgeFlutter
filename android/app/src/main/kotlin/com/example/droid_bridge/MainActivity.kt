@@ -28,23 +28,23 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "getPlatformSnapshot" -> result.success(
                     mapOf(
-                        "platformName" to "Android Companion",
+                        "platformName" to "Android Phone Companion",
                         "platformRole" to "phone",
                         "deviceName" to "${Build.MANUFACTURER} ${Build.MODEL}",
                         "isNativeChannelAvailable" to true,
                         "capabilities" to listOf(
                             "Local device profile",
-                            "MediaProjection-ready shell",
-                            "Share target integration",
+                            "MediaProjection stream sender",
+                            "Continuity AirDrop target",
                         ),
                     ),
                 )
                 "getMirroringStatus" -> result.success(
                     mirroringStatusMap(
                         message = if (capturePermissionGranted) {
-                            "Android capture permission is ready. The transport layer is the next native step."
+                            "Screen capture permission active. MediaProjection ready."
                         } else {
-                            "Request Android screen capture permission to prepare for mirroring."
+                            "Request screen capture permission to begin iPhone Continuity stream."
                         },
                     ),
                 )
@@ -53,7 +53,7 @@ class MainActivity : FlutterActivity() {
                     capturePermissionGranted = false
                     result.success(
                         mirroringStatusMap(
-                            message = "Android mirroring state reset.",
+                            message = "Continuity mirroring session reset.",
                         ),
                     )
                 }
@@ -64,18 +64,22 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun requestScreenCapturePermission(result: MethodChannel.Result) {
-        val manager =
-            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        pendingMirroringResult = result
-        val captureIntent: Intent = manager.createScreenCaptureIntent()
-        startActivityForResult(captureIntent, screenCaptureRequestCode)
+        try {
+            val manager =
+                getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            pendingMirroringResult = result
+            val captureIntent: Intent = manager.createScreenCaptureIntent()
+            startActivityForResult(captureIntent, screenCaptureRequestCode)
+        } catch (e: Exception) {
+            result.error("PERMISSION_ERROR", "Failed to launch screen capture prompt: ${e.message}", null)
+        }
     }
 
     private fun mirroringStatusMap(message: String): Map<String, Any> {
         return mapOf(
             "supported" to true,
             "mode" to "android_sender",
-            "isActive" to false,
+            "isActive" to capturePermissionGranted,
             "permissionGranted" to capturePermissionGranted,
             "message" to message,
         )
@@ -95,7 +99,7 @@ class MainActivity : FlutterActivity() {
         result?.success(
             mirroringStatusMap(
                 message = if (granted) {
-                    "Screen capture permission granted on Android."
+                    "Screen capture permission granted on phone."
                 } else {
                     "Screen capture permission was canceled."
                 },
