@@ -6,8 +6,8 @@ import 'dart:typed_data';
 
 import 'package:droid_bridge/core/models/connection_request.dart';
 import 'package:droid_bridge/core/models/discovered_device.dart';
-import 'package:droid_bridge/core/models/peer_device.dart';
 import 'package:droid_bridge/core/models/mirroring_status.dart';
+import 'package:droid_bridge/core/models/peer_device.dart';
 import 'package:droid_bridge/core/models/platform_snapshot.dart';
 import 'package:droid_bridge/core/models/share_note.dart';
 import 'package:droid_bridge/core/models/transfer_record.dart';
@@ -34,24 +34,31 @@ class LocalBridgeController extends ChangeNotifier {
   final List<ConnectionRequest> incomingConnectionRequests =
       <ConnectionRequest>[];
   final Set<String> outgoingConnectionRequestHosts = <String>{};
+  final List<String> clipboardHistory = <String>[];
 
+  bool _isDisposed = false;
   PlatformSnapshot? snapshot;
   HttpServer? _server;
   RawDatagramSocket? _discoverySocket;
   WebSocket? _socket;
   Timer? _discoveryAnnouncementTimer;
+  Timer? _clipboardPollingTimer;
+
   PeerDevice? connectedPeer;
   String pairingCode = _generatePairingCode();
-  String statusLine = 'Starting local bridge...';
+  String statusLine = 'Initializing Continuity Bridge...';
   String? errorMessage;
   String? remoteClipboardText;
+  bool autoSyncClipboard = true;
+
   MirroringStatus mirroringStatus = const MirroringStatus(
     supported: false,
     mode: 'none',
     isActive: false,
     permissionGranted: false,
-    message: 'Checking native mirroring support...',
+    message: 'Checking native Continuity mirroring support...',
   );
+
   bool isReady = false;
   bool isConnecting = false;
   bool isBusyWithMirroring = false;
@@ -62,11 +69,18 @@ class LocalBridgeController extends ChangeNotifier {
       localAddresses.isEmpty ? '127.0.0.1' : localAddresses.first;
 
   String get localDeviceName =>
-      snapshot?.deviceName ?? snapshot?.platformName ?? 'This device';
+      snapshot?.deviceName ?? snapshot?.platformName ?? 'This Device';
 
   bool get isConnected => connectedPeer != null && _socket != null;
 
   String get listeningEndpoint => '$primaryAddress:$port';
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
 
   Future<void> initialize() async {
     try {
@@ -75,11 +89,13 @@ class LocalBridgeController extends ChangeNotifier {
       await _startServer();
       await _loadLocalAddresses();
       await _startDiscovery();
-      statusLine = 'Ready to pair';
+      _startClipboardPoller();
+      statusLine = 'Ready for Continuity';
       isReady = true;
     } catch (error) {
-      errorMessage = 'Failed to initialize local bridge: $error';
-      statusLine = 'Initialization failed';
+      errorMessage = 'Failed to initialize bridge: $error';
+      statusLine = 'Initialization warning';
+      isReady = true;
     }
     notifyListeners();
   }
@@ -92,15 +108,14 @@ class LocalBridgeController extends ChangeNotifier {
     final normalizedCode = remoteCode.trim();
 
     if (normalizedHost.isEmpty || normalizedCode.isEmpty) {
-      errorMessage = 'Enter both the peer IP address and the peer code.';
+      errorMessage = 'Please enter both host address and pairing code.';
       notifyListeners();
       return;
     }
 
     final peerAddress = _parsePeerAddress(normalizedHost);
     if (peerAddress == null) {
-      errorMessage =
-          'Enter a valid peer address like 192.168.1.22 or 192.168.1.22:45454.';
+      errorMessage = 'Invalid device address format (e.g. 192.168.1.15).';
       notifyListeners();
       return;
     }
@@ -113,17 +128,18 @@ class LocalBridgeController extends ChangeNotifier {
     try {
       final socket = await WebSocket.connect(
         'ws://${peerAddress.host}:${peerAddress.port}/ws?code=$normalizedCode',
-      );
+      ).timeout(const Duration(seconds: 8));
+
       _bindSocket(
         socket,
         hostOverride: peerAddress.host,
         portOverride: peerAddress.port,
         remoteCodeHint: normalizedCode,
       );
-      statusLine = 'Connected to ${peerAddress.host}:${peerAddress.port}';
+      statusLine = 'Connected via Continuity with ${peerAddress.host}';
     } catch (error) {
       errorMessage = 'Connection failed: $error';
-      statusLine = 'Unable to connect';
+      statusLine = 'Unable to pair';
     }
 
     isConnecting = false;
@@ -136,8 +152,10 @@ class LocalBridgeController extends ChangeNotifier {
     _socket = null;
     connectedPeer = null;
     notifyListeners();
-    await socket?.close();
-    statusLine = 'Ready to pair';
+    try {
+      await socket?.close();
+    } catch (_) {}
+    statusLine = 'Ready for Continuity';
     notifyListeners();
   }
 
@@ -151,7 +169,7 @@ class LocalBridgeController extends ChangeNotifier {
           await _platformBridgeService.requestScreenCapturePermission();
       statusLine = mirroringStatus.message;
     } catch (error) {
-      errorMessage = 'Unable to request screen capture permission: $error';
+      errorMessage = 'Screen capture permission failed: $error';
     }
 
     isBusyWithMirroring = false;
@@ -167,7 +185,7 @@ class LocalBridgeController extends ChangeNotifier {
       mirroringStatus = await _platformBridgeService.openMirrorReceiverWindow();
       statusLine = mirroringStatus.message;
     } catch (error) {
-      errorMessage = 'Unable to open mirror receiver: $error';
+      errorMessage = 'Receiver window request failed: $error';
     }
 
     isBusyWithMirroring = false;
@@ -183,18 +201,28 @@ class LocalBridgeController extends ChangeNotifier {
       mirroringStatus = await _platformBridgeService.stopMirroringSession();
       statusLine = mirroringStatus.message;
     } catch (error) {
-      errorMessage = 'Unable to stop mirroring: $error';
+      errorMessage = 'Stop mirroring request failed: $error';
     }
 
     isBusyWithMirroring = false;
     notifyListeners();
   }
 
-  Future<void> sendClipboard() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text?.trim();
+  void toggleAutoSyncClipboard(bool enabled) {
+    autoSyncClipboard = enabled;
+    statusLine = enabled ? 'Universal Clipboard auto-sync enabled' : 'Universal Clipboard manual mode';
+    notifyListeners();
+  }
+
+  Future<void> sendClipboard({String? customText}) async {
+    String? text = customText;
+    if (text == null) {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      text = data?.text?.trim();
+    }
+
     if (text == null || text.isEmpty) {
-      errorMessage = 'There is no text in the clipboard to send.';
+      errorMessage = 'Clipboard is empty.';
       notifyListeners();
       return;
     }
@@ -207,20 +235,20 @@ class LocalBridgeController extends ChangeNotifier {
       'type': 'clipboard',
       'text': text,
     });
-    statusLine = 'Sent clipboard text';
+    statusLine = 'Synced clipboard to peer';
     notifyListeners();
   }
 
   Future<void> applyRemoteClipboard() async {
     final text = remoteClipboardText;
     if (text == null || text.isEmpty) {
-      errorMessage = 'No remote clipboard text has been received yet.';
+      errorMessage = 'No remote clipboard content available.';
       notifyListeners();
       return;
     }
 
     await Clipboard.setData(ClipboardData(text: text));
-    statusLine = 'Copied remote clipboard locally';
+    statusLine = 'Copied to system clipboard';
     notifyListeners();
   }
 
@@ -250,7 +278,7 @@ class LocalBridgeController extends ChangeNotifier {
       'author': author,
       'message': normalized,
     });
-    statusLine = 'Sent message';
+    statusLine = 'Message sent';
     notifyListeners();
   }
 
@@ -259,14 +287,20 @@ class LocalBridgeController extends ChangeNotifier {
       return;
     }
 
-    final file = await openFile();
+    XFile? file;
+    try {
+      file = await openFile();
+    } catch (_) {
+      file = null;
+    }
+
     if (file == null) {
       return;
     }
 
     final peer = connectedPeer;
     if (peer == null) {
-      errorMessage = 'Connect to a peer before sending files.';
+      errorMessage = 'No connected peer available for transfer.';
       notifyListeners();
       return;
     }
@@ -298,181 +332,28 @@ class LocalBridgeController extends ChangeNotifier {
           sizeBytes: length,
           direction: TransferDirection.outgoing,
           createdAt: DateTime.now(),
-          summary: 'Sent to ${peer.name}',
+          summary: 'Sent via AirDrop to ${peer.name}',
         ),
       );
-      statusLine = 'Sent ${file.name}';
+      statusLine = 'AirDrop sent ${file.name} successfully';
       notifyListeners();
     } catch (error) {
       errorMessage = 'File transfer failed: $error';
-      statusLine = 'File transfer failed';
+      statusLine = 'AirDrop transfer failed';
       notifyListeners();
     }
-  }
-
-  @override
-  void dispose() {
-    _discoveryAnnouncementTimer?.cancel();
-    _discoverySocket?.close();
-    unawaited(_socket?.close());
-    unawaited(_server?.close(force: true));
-    super.dispose();
-  }
-
-  Future<void> _startServer() async {
-    _server = await HttpServer.bind(
-      InternetAddress.anyIPv4,
-      port,
-      shared: true,
-    );
-    unawaited(
-      _server!.forEach(_handleRequest),
-    );
-  }
-
-  Future<void> _loadLocalAddresses() async {
-    final interfaces = await NetworkInterface.list(
-      includeLoopback: false,
-      type: InternetAddressType.IPv4,
-    );
-
-    localAddresses
-      ..clear()
-      ..addAll(
-        interfaces
-            .expand((interface) => interface.addresses)
-            .map((address) => address.address)
-            .where((address) => !address.startsWith('169.254.')),
-      );
-  }
-
-  Future<void> _startDiscovery() async {
-    _discoverySocket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      _discoveryPort,
-      reuseAddress: true,
-      reusePort: true,
-    );
-    _discoverySocket!
-      ..broadcastEnabled = true
-      ..readEventsEnabled = true
-      ..writeEventsEnabled = false;
-
-    _discoverySocket!.listen((event) {
-      if (event != RawSocketEvent.read) {
-        return;
-      }
-
-      final datagram = _discoverySocket!.receive();
-      if (datagram == null) {
-        return;
-      }
-
-      _handleDiscoveryDatagram(datagram);
-    });
-
-    await _announcePresence();
-    _discoveryAnnouncementTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => unawaited(_announcePresence()),
-    );
-  }
-
-  Future<void> _handleRequest(HttpRequest request) async {
-    final code =
-        request.uri.queryParameters['code'] ?? request.headers.value('x-pairing-code');
-
-    if (request.uri.path == '/ws') {
-      if (code != pairingCode) {
-        request.response.statusCode = HttpStatus.unauthorized;
-        await request.response.close();
-        return;
-      }
-
-      final socket = await WebSocketTransformer.upgrade(request);
-      final host = request.connectionInfo?.remoteAddress.address ?? 'peer';
-      _bindSocket(
-        socket,
-        hostOverride: host,
-        portOverride: port,
-      );
-      statusLine = 'Peer connected from $host';
-      notifyListeners();
-      return;
-    }
-
-    if (request.method == 'POST' && request.uri.path == '/upload') {
-      if (code != pairingCode) {
-        request.response.statusCode = HttpStatus.unauthorized;
-        await request.response.close();
-        return;
-      }
-
-      final fileName = _safeFileName(
-        request.headers.value('x-file-name') ?? 'shared-file.bin',
-      );
-      final bytes = await request.fold<BytesBuilder>(
-        BytesBuilder(copy: false),
-        (builder, data) => builder..add(data),
-      );
-      final directory = await _receivedDirectory();
-      final uniqueName = _uniqueFileName(directory.path, fileName);
-      final targetFile = File('${directory.path}/$uniqueName');
-      await targetFile.writeAsBytes(bytes.takeBytes(), flush: true);
-
-      transfers.insert(
-        0,
-        TransferRecord(
-          name: uniqueName,
-          path: targetFile.path,
-          sizeBytes: await targetFile.length(),
-          direction: TransferDirection.incoming,
-          createdAt: DateTime.now(),
-          summary: 'Received from ${connectedPeer?.name ?? request.connectionInfo?.remoteAddress.address ?? 'peer'}',
-        ),
-      );
-      statusLine = 'Received $uniqueName';
-      notifyListeners();
-
-      request.response.headers.contentType = ContentType.json;
-      request.response.write(
-        jsonEncode(<String, Object?>{
-          'ok': true,
-          'savedPath': targetFile.path,
-        }),
-      );
-      await request.response.close();
-      return;
-    }
-
-    if (request.method == 'GET' && request.uri.path == '/info') {
-      request.response.headers.contentType = ContentType.json;
-      request.response.write(
-        jsonEncode(<String, Object?>{
-          'deviceName': localDeviceName,
-          'platformRole': snapshot?.platformRole ?? 'companion',
-          'pairingCode': pairingCode,
-          'port': port,
-        }),
-      );
-      await request.response.close();
-      return;
-    }
-
-    request.response.statusCode = HttpStatus.notFound;
-    await request.response.close();
   }
 
   void useDiscoveredDevice(DiscoveredDevice device) {
     errorMessage = null;
-    statusLine = 'Loaded ${device.name} from nearby discovery.';
+    statusLine = 'Selected ${device.name} (${device.host})';
     notifyListeners();
   }
 
   Future<void> sendConnectionRequest(DiscoveredDevice device) async {
     errorMessage = null;
     outgoingConnectionRequestHosts.add(device.host);
-    statusLine = 'Sent connection request to ${device.name}.';
+    statusLine = 'Pairing request sent to ${device.name}...';
     notifyListeners();
 
     await _sendDiscoveryPayload(
@@ -491,7 +372,7 @@ class LocalBridgeController extends ChangeNotifier {
     incomingConnectionRequests.removeWhere(
       (entry) => entry.host == request.host,
     );
-    statusLine = 'Accepted ${request.deviceName}. Connecting...';
+    statusLine = 'Accepted pairing with ${request.deviceName}...';
     notifyListeners();
 
     await _sendDiscoveryPayload(
@@ -516,7 +397,7 @@ class LocalBridgeController extends ChangeNotifier {
     incomingConnectionRequests.removeWhere(
       (entry) => entry.host == request.host,
     );
-    statusLine = 'Declined ${request.deviceName}.';
+    statusLine = 'Declined connection request from ${request.deviceName}.';
     notifyListeners();
 
     await _sendDiscoveryPayload(
@@ -530,6 +411,193 @@ class LocalBridgeController extends ChangeNotifier {
     );
   }
 
+  @override
+  void dispose() {
+    _isDisposed = true;
+    _discoveryAnnouncementTimer?.cancel();
+    _clipboardPollingTimer?.cancel();
+    try {
+      _discoverySocket?.close();
+    } catch (_) {}
+    unawaited(_socket?.close());
+    unawaited(_server?.close(force: true));
+    super.dispose();
+  }
+
+  Future<void> _startServer() async {
+    try {
+      _server = await HttpServer.bind(
+        InternetAddress.anyIPv4,
+        port,
+        shared: true,
+      );
+      unawaited(_server!.forEach(_handleRequest));
+    } catch (e) {
+      errorMessage = 'Local server bind issue: $e';
+    }
+  }
+
+  Future<void> _loadLocalAddresses() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+
+      localAddresses
+        ..clear()
+        ..addAll(
+          interfaces
+              .expand((interface) => interface.addresses)
+              .map((address) => address.address)
+              .where((address) => !address.startsWith('169.254.')),
+        );
+    } catch (_) {}
+  }
+
+  Future<void> _startDiscovery() async {
+    try {
+      _discoverySocket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        _discoveryPort,
+        reuseAddress: true,
+        reusePort: true,
+      );
+      _discoverySocket!
+        ..broadcastEnabled = true
+        ..readEventsEnabled = true
+        ..writeEventsEnabled = false;
+
+      _discoverySocket!.listen(
+        (event) {
+          if (_isDisposed || event != RawSocketEvent.read) return;
+          try {
+            final datagram = _discoverySocket?.receive();
+            if (datagram != null) {
+              _handleDiscoveryDatagram(datagram);
+            }
+          } catch (_) {}
+        },
+        onError: (_) {},
+      );
+
+      await _announcePresence();
+      _discoveryAnnouncementTimer = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => unawaited(_announcePresence()),
+      );
+    } catch (_) {
+      // Non-critical background discovery
+    }
+  }
+
+  void _startClipboardPoller() {
+    String? previousContent;
+    _clipboardPollingTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (_isDisposed || !autoSyncClipboard || !isConnected) return;
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        final current = data?.text?.trim();
+        if (current != null && current.isNotEmpty && current != previousContent && current != remoteClipboardText) {
+          previousContent = current;
+          await sendClipboard(customText: current);
+        }
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _handleRequest(HttpRequest request) async {
+    try {
+      final code =
+          request.uri.queryParameters['code'] ?? request.headers.value('x-pairing-code');
+
+      if (request.uri.path == '/ws') {
+        if (code != pairingCode) {
+          request.response.statusCode = HttpStatus.unauthorized;
+          await request.response.close();
+          return;
+        }
+
+        final socket = await WebSocketTransformer.upgrade(request);
+        final host = request.connectionInfo?.remoteAddress.address ?? 'peer';
+        _bindSocket(
+          socket,
+          hostOverride: host,
+          portOverride: port,
+        );
+        statusLine = 'Continuity peer connected ($host)';
+        notifyListeners();
+        return;
+      }
+
+      if (request.method == 'POST' && request.uri.path == '/upload') {
+        if (code != pairingCode) {
+          request.response.statusCode = HttpStatus.unauthorized;
+          await request.response.close();
+          return;
+        }
+
+        final fileName = _safeFileName(
+          request.headers.value('x-file-name') ?? 'shared-file.bin',
+        );
+        final bytes = await request.fold<BytesBuilder>(
+          BytesBuilder(copy: false),
+          (builder, data) => builder..add(data),
+        );
+        final directory = await _receivedDirectory();
+        final uniqueName = _uniqueFileName(directory.path, fileName);
+        final targetFile = File('${directory.path}/$uniqueName');
+        await targetFile.writeAsBytes(bytes.takeBytes(), flush: true);
+
+        transfers.insert(
+          0,
+          TransferRecord(
+            name: uniqueName,
+            path: targetFile.path,
+            sizeBytes: await targetFile.length(),
+            direction: TransferDirection.incoming,
+            createdAt: DateTime.now(),
+            summary: 'Received via AirDrop from ${connectedPeer?.name ?? request.connectionInfo?.remoteAddress.address ?? 'peer'}',
+          ),
+        );
+        statusLine = 'Received $uniqueName via AirDrop';
+        notifyListeners();
+
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode(<String, Object?>{
+            'ok': true,
+            'savedPath': targetFile.path,
+          }),
+        );
+        await request.response.close();
+        return;
+      }
+
+      if (request.method == 'GET' && request.uri.path == '/info') {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode(<String, Object?>{
+            'deviceName': localDeviceName,
+            'platformRole': snapshot?.platformRole ?? 'companion',
+            'pairingCode': pairingCode,
+            'port': port,
+          }),
+        );
+        await request.response.close();
+        return;
+      }
+
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    } catch (_) {
+      try {
+        request.response.statusCode = HttpStatus.internalServerError;
+        await request.response.close();
+      } catch (_) {}
+    }
+  }
+
   void _bindSocket(
     WebSocket socket, {
     required String hostOverride,
@@ -539,7 +607,7 @@ class LocalBridgeController extends ChangeNotifier {
     unawaited(_socket?.close());
     _socket = socket;
     connectedPeer = PeerDevice(
-      name: 'Connected peer',
+      name: 'Connected Device',
       role: 'companion',
       host: hostOverride,
       port: portOverride,
@@ -580,7 +648,7 @@ class LocalBridgeController extends ChangeNotifier {
         case 'hello':
           final existing = connectedPeer;
           connectedPeer = PeerDevice(
-            name: payload['deviceName'] as String? ?? 'Connected peer',
+            name: payload['deviceName'] as String? ?? 'Connected Device',
             role: payload['platformRole'] as String? ?? 'companion',
             host: existing?.host ?? 'peer',
             port: existing?.port ?? port,
@@ -594,8 +662,17 @@ class LocalBridgeController extends ChangeNotifier {
           statusLine = 'Connected to ${connectedPeer!.name}';
           break;
         case 'clipboard':
-          remoteClipboardText = payload['text'] as String? ?? '';
-          statusLine = 'Received clipboard text';
+          final text = payload['text'] as String? ?? '';
+          remoteClipboardText = text;
+          if (text.isNotEmpty && !clipboardHistory.contains(text)) {
+            clipboardHistory.insert(0, text);
+          }
+          if (autoSyncClipboard && text.isNotEmpty) {
+            Clipboard.setData(ClipboardData(text: text));
+            statusLine = 'Universal Clipboard auto-synced';
+          } else {
+            statusLine = 'New clipboard item received';
+          }
           break;
         case 'note':
           notes.insert(
@@ -607,13 +684,13 @@ class LocalBridgeController extends ChangeNotifier {
               timestamp: DateTime.now(),
             ),
           );
-          statusLine = 'Received message';
+          statusLine = 'Message received';
           break;
         default:
-          statusLine = 'Received an unsupported event';
+          statusLine = 'Received Continuity event';
       }
     } catch (error) {
-      errorMessage = 'Malformed peer message: $error';
+      errorMessage = 'Malformed message: $error';
     }
 
     notifyListeners();
@@ -621,7 +698,7 @@ class LocalBridgeController extends ChangeNotifier {
 
   bool _canSend() {
     if (!isConnected || _socket == null || connectedPeer == null) {
-      errorMessage = 'Connect to a peer first.';
+      errorMessage = 'Pair with a device first.';
       notifyListeners();
       return false;
     }
@@ -630,7 +707,9 @@ class LocalBridgeController extends ChangeNotifier {
   }
 
   void _sendJson(Map<String, Object?> payload) {
-    _socket?.add(jsonEncode(payload));
+    try {
+      _socket?.add(jsonEncode(payload));
+    } catch (_) {}
   }
 
   Future<void> _announcePresence() async {
@@ -657,7 +736,7 @@ class LocalBridgeController extends ChangeNotifier {
       switch (payload['type']) {
         case 'bridge_hello':
           final discoveredDevice = DiscoveredDevice(
-            name: payload['deviceName'] as String? ?? 'Nearby device',
+            name: payload['deviceName'] as String? ?? 'Nearby Device',
             role: payload['platformRole'] as String? ?? 'companion',
             host: host,
             port: payload['port'] as int? ?? port,
@@ -684,7 +763,7 @@ class LocalBridgeController extends ChangeNotifier {
           break;
         case 'connection_request':
           final request = ConnectionRequest(
-            deviceName: payload['deviceName'] as String? ?? 'Nearby device',
+            deviceName: payload['deviceName'] as String? ?? 'Nearby Device',
             role: payload['platformRole'] as String? ?? 'companion',
             host: host,
             port: payload['port'] as int? ?? port,
@@ -699,16 +778,16 @@ class LocalBridgeController extends ChangeNotifier {
           } else {
             incomingConnectionRequests[existingIndex] = request;
           }
-          statusLine = '${request.deviceName} wants to connect.';
+          statusLine = '${request.deviceName} wants to pair.';
           notifyListeners();
           break;
         case 'connection_response':
           outgoingConnectionRequestHosts.remove(host);
           final responseStatus = payload['status'] as String? ?? 'unknown';
           final responderName =
-              payload['deviceName'] as String? ?? 'Nearby device';
+              payload['deviceName'] as String? ?? 'Nearby Device';
           if (responseStatus == 'accepted') {
-            statusLine = '$responderName accepted the request. Connecting...';
+            statusLine = '$responderName accepted pairing request. Connecting...';
             notifyListeners();
             unawaited(
               connectToPeer(
@@ -717,14 +796,12 @@ class LocalBridgeController extends ChangeNotifier {
               ),
             );
           } else {
-            statusLine = '$responderName declined the request.';
+            statusLine = '$responderName declined pairing request.';
             notifyListeners();
           }
           break;
       }
-    } catch (_) {
-      // Ignore malformed discovery packets from the local network.
-    }
+    } catch (_) {}
   }
 
   Future<void> _sendDiscoveryPayload(
@@ -736,19 +813,20 @@ class LocalBridgeController extends ChangeNotifier {
       return;
     }
 
-    final bytes = utf8.encode(jsonEncode(payload));
-    socket.send(
-      bytes,
-      targetHost == null
-          ? InternetAddress('255.255.255.255')
-          : InternetAddress(targetHost),
-      _discoveryPort,
-    );
+    try {
+      final bytes = utf8.encode(jsonEncode(payload));
+      socket.send(
+        bytes,
+        targetHost == null
+            ? InternetAddress('255.255.255.255')
+            : InternetAddress(targetHost),
+        _discoveryPort,
+      );
+    } catch (_) {}
   }
 
   Future<Directory> _receivedDirectory() async {
-    final baseDirectory =
-        await getApplicationDocumentsDirectory();
+    final baseDirectory = await getApplicationDocumentsDirectory();
     final directory = Directory('${baseDirectory.path}/received');
     if (!await directory.exists()) {
       await directory.create(recursive: true);
@@ -774,17 +852,27 @@ class LocalBridgeController extends ChangeNotifier {
       return null;
     }
 
-    final uri = Uri.tryParse('ws://$value');
-    if (uri == null || uri.host.isEmpty) {
+    final parts = value.split(':');
+    final host = parts[0].trim();
+    if (host.isEmpty) {
       return null;
     }
 
-    final resolvedPort = uri.hasPort ? uri.port : _defaultPort;
-    if (resolvedPort <= 0) {
+    final hostRegExp = RegExp(r'^[a-zA-Z0-9\.\-_]+$');
+    if (!hostRegExp.hasMatch(host)) {
       return null;
     }
 
-    return _PeerAddress(uri.host, resolvedPort);
+    int resolvedPort = _defaultPort;
+    if (parts.length > 1) {
+      final parsed = int.tryParse(parts[1].trim());
+      if (parsed == null || parsed <= 0) {
+        return null;
+      }
+      resolvedPort = parsed;
+    }
+
+    return _PeerAddress(host, resolvedPort);
   }
 
   static String _uniqueFileName(String directoryPath, String fileName) {

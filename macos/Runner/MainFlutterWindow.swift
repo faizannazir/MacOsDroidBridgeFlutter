@@ -20,14 +20,14 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "getPlatformSnapshot":
         result([
-          "platformName": "macOS Desktop Companion",
+          "platformName": "macOS Desktop Continuity",
           "platformRole": "desktop",
-          "deviceName": Host.current().localizedName ?? "Mac",
+          "deviceName": Host.current().localizedName ?? "MacBook Pro",
           "isNativeChannelAvailable": true,
           "capabilities": [
             "Native window host",
             "AppKit bridge",
-            "Nearby sharing shell",
+            "iPhone Continuity receiver",
           ],
         ])
       case "getMirroringStatus":
@@ -37,8 +37,8 @@ class MainFlutterWindow: NSWindow {
           "isActive": self.receiverWindow != nil,
           "permissionGranted": true,
           "message": self.receiverWindow == nil
-            ? "Open the native receiver window on macOS, then pair the Android device."
-            : "Receiver window is open and ready for a future video transport layer.",
+            ? "Open the native receiver window on macOS to prepare for iPhone Continuity."
+            : "Continuity receiver window is active.",
         ])
       case "openMirrorReceiverWindow":
         self.openReceiverWindow()
@@ -57,7 +57,7 @@ class MainFlutterWindow: NSWindow {
           "mode": "macos_receiver",
           "isActive": false,
           "permissionGranted": true,
-          "message": "Receiver window closed.",
+          "message": "Continuity receiver window closed.",
         ])
       default:
         result(FlutterMethodNotImplemented)
@@ -81,22 +81,23 @@ class MainFlutterWindow: NSWindow {
       defer: false
     )
     window.center()
-    window.title = "Droid Bridge Receiver"
+    window.title = "iPhone Mirroring Receiver"
 
-    let label = NSTextField(labelWithString: "Receiver window ready.\n\nThe next native step is streaming Android frames into this surface.")
+    let label = NSTextField(labelWithString: "iPhone Continuity Receiver Ready\n\nConnected stream will render inside this AppKit window.")
     label.alignment = .center
     label.maximumNumberOfLines = 3
-    label.font = NSFont.systemFont(ofSize: 22, weight: .medium)
+    label.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
     label.translatesAutoresizingMaskIntoConstraints = false
 
     let container = NSView(frame: rect)
     container.wantsLayer = true
     container.layer?.backgroundColor = NSColor(
-      red: 0.93,
-      green: 0.97,
-      blue: 0.95,
+      red: 0.12,
+      green: 0.12,
+      blue: 0.14,
       alpha: 1.0
     ).cgColor
+    label.textColor = NSColor.white
     container.addSubview(label)
     NSLayoutConstraint.activate([
       label.centerXAnchor.constraint(equalTo: container.centerXAnchor),

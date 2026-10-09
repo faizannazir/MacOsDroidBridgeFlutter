@@ -1,4 +1,5 @@
 import 'package:droid_bridge/features/dashboard/presentation/dashboard_screen.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 class BridgeApp extends StatelessWidget {
@@ -6,44 +7,79 @@ class BridgeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const sand = Color(0xFFF6F1E8);
-    const ink = Color(0xFF132238);
-    const coral = Color(0xFFE9715F);
-    const teal = Color(0xFF2E7D7A);
+    const appleBlue = Color(0xFF007AFF);
+    const darkBackground = Color(0xFF1E1E24);
+    const darkSurface = Color(0xFF282830);
+    const lightBackground = Color(0xFFF2F2F7);
 
-    final theme = ThemeData(
+    final darkTheme = ThemeData(
       useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: darkBackground,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: teal,
-        brightness: Brightness.light,
-        surface: sand,
+        seedColor: appleBlue,
+        brightness: Brightness.dark,
+        surface: darkSurface,
       ).copyWith(
-        primary: teal,
-        secondary: coral,
-        surface: sand,
-        onSurface: ink,
+        primary: appleBlue,
+        secondary: const Color(0xFF34C759),
+        surface: darkSurface,
+        onSurface: Colors.white,
       ),
-      scaffoldBackgroundColor: sand,
-      textTheme: ThemeData.light().textTheme.apply(
-            bodyColor: ink,
-            displayColor: ink,
-          ),
       cardTheme: CardThemeData(
-        color: Colors.white.withValues(alpha: 0.9),
+        color: darkSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
-          side: BorderSide(
-            color: ink.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(
+            color: Color(0x1F2C2C35),
+            width: 1,
           ),
         ),
+      ),
+      cupertinoOverrideTheme: const CupertinoThemeData(
+        primaryColor: appleBlue,
+        brightness: Brightness.dark,
+      ),
+    );
+
+    final lightTheme = ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: lightBackground,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: appleBlue,
+        brightness: Brightness.light,
+        surface: Colors.white,
+      ).copyWith(
+        primary: appleBlue,
+        secondary: const Color(0xFF34C759),
+        surface: Colors.white,
+        onSurface: const Color(0xFF1C1C1E),
+      ),
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: Colors.black.withValues(alpha: 0.08),
+            width: 1,
+          ),
+        ),
+      ),
+      cupertinoOverrideTheme: const CupertinoThemeData(
+        primaryColor: appleBlue,
+        brightness: Brightness.light,
       ),
     );
 
     return MaterialApp(
-      title: 'Droid Bridge',
+      title: 'Continuity Bridge',
       debugShowCheckedModeBanner: false,
-      theme: theme,
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: ThemeMode.dark,
       home: const DashboardScreen(),
     );
   }
