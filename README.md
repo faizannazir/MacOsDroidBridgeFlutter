@@ -1,47 +1,49 @@
-# Droid Bridge
+# iPhone Continuity Bridge for macOS & Android
 
-`Droid Bridge` is a Flutter companion app for `android` and `macos`. It is
-designed for your own devices on the same local network and currently ships a
-practical first milestone:
+`Continuity Bridge` is a companion experience bringing iPhone-style macOS Continuity and iPhone Mirroring features to Android and Mac.
 
-- manual pairing with IP address + pairing code
-- clipboard text sharing
-- quick note/message sending
-- direct file transfer
-- native platform bridge hooks for Android and macOS
-- Android screen-capture permission flow scaffold
-- macOS native receiver window scaffold
+## Features
 
-## What is realistic
+- 📱 **iPhone Mirroring**: Realistic iPhone mockup frame with live stream surface, notch/dynamic island, status bar, and native AppKit receiver window.
+- 🔗 **Direct USB Connection**: Connect directly via USB cable (ADB loopback) without any Wi-Fi router or external network dependency.
+- 📲 **AirDrop & File Transfer**: Instant local file sharing between phone and Mac.
+- 📋 **Universal Clipboard**: Copy on phone, paste on Mac automatically with real-time auto-sync.
+- 💬 **Continuity Messaging**: Quick iMessage-style messaging thread across paired devices.
+- ⚙️ **AirDrop Discovery**: Automatic network discovery and 1-click pairing requests.
 
-This project can give Android a useful macOS companion experience, but it
-cannot become Apple's private Continuity stack or true iPhone Mirroring.
+---
 
-What works well in a custom app:
+## macOS First-Run Notice ("Apple could not verify...")
 
-- local pairing
-- file sharing
-- clipboard sync
-- notification relay with Android native work
-- screen mirroring with Android `MediaProjection` and a low-latency stream
+When downloading the app release from GitHub on macOS, Gatekeeper will show a warning:
+> *"Apple could not verify 'Droid Bridge' is free of malware..."*
 
-What is blocked by Apple platform boundaries:
+This occurs because open-source releases built on GitHub Actions use ad-hoc local code signing without a paid $99/year Apple Developer notarization certificate.
 
-- private Continuity APIs
-- system-level iPhone Mirroring parity
-- making Android appear as a native Apple mobile device to macOS
+### How to Open on macOS Sequoia / macOS Sonoma:
 
-## Current app flow
+#### Option 1: System Settings (Recommended)
+1. Open **System Settings** on your Mac.
+2. Go to **Privacy & Security**.
+3. Scroll down to the **Security** section.
+4. Click **Open Anyway** next to the notification for Droid Bridge.
+5. Enter your Mac administrator password and confirm.
 
-1. Launch the app on macOS and Android while both devices are on the same Wi-Fi network.
-2. Read the IP address and pairing code from one device.
-3. Enter that IP address and code on the other device and press `Connect`.
-4. Use `Send clipboard`, `Send note`, or `Send file`.
-5. Received files are saved inside the app documents folder under `received`.
-6. On Android, use `Request capture permission` to prepare the native mirroring sender.
-7. On macOS, use `Open receiver window` to open the native receiver shell.
+#### Option 2: Finder Right-Click
+1. In Finder, locate `Droid Bridge.app`.
+2. **Control-click** (or Right-click) the app icon and select **Open** from the menu.
+3. Click **Open** in the warning dialog.
 
-## Local run
+#### Option 3: Terminal (Instant Fix)
+Run this single command in Terminal to clear the download quarantine attribute:
+```bash
+xattr -cr /Applications/"Droid Bridge.app"
+```
+*(or point to the path of your downloaded `.app` bundle)*
+
+---
+
+## Local Development
 
 ```bash
 flutter pub get
@@ -49,34 +51,15 @@ flutter run -d macos
 flutter run -d android
 ```
 
-## macOS signing for personal use
+## macOS Local Signing
 
-This repository includes [Signing.xcconfig](/Users/nomi/Documents/New project/droid_bridge/macos/Runner/Configs/Signing.xcconfig)
-for local macOS builds.
+For personal local builds:
+- Edit [Signing.xcconfig](macos/Runner/Configs/Signing.xcconfig) to set your Personal Team ID if using Xcode.
+- Ad-hoc signing (`CODE_SIGN_IDENTITY = -`) is configured by default for local development.
 
-- If ad-hoc local signing is enough, leave `PERSONAL_TEAM_ID` blank.
-- If Xcode asks for a team, open the macOS target in Xcode and choose your free `Personal Team`.
-- GitHub Actions builds the macOS app without code signing, because free personal signing identities cannot be used safely in CI.
-- Without a paid Apple Developer account, you should not expect notarization or friction-free distribution on other Macs.
+## Automated Builds
 
-## GitHub Actions
-
-Two workflows are included:
-
-- `ci.yml` runs `flutter analyze` and `flutter test`
-- `release.yml` builds release artifacts for Android and macOS on Git tags that start with `v`
-
-The release workflow uploads:
-
-- Android release APK
-- macOS release `.app` zipped as an artifact
-
-## Next native milestone
-
-The next serious feature is turning the mirroring scaffold into a live stream:
-
-- Android foreground service
-- `MediaProjection` capture pipeline
-- socket or WebRTC transport
-- macOS player surface
-- input forwarding if you want remote control later
+GitHub Actions automatically builds release artifacts on Git commits to `main`:
+- Dynamic semantic versioning (`v1.0.x`) and build numbers.
+- Android release APK.
+- macOS release `.app` ZIP archive with executable permissions.

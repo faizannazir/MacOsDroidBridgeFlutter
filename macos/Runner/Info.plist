@@ -22,11 +22,19 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Droid Bridge requires local network access to connect with your phone for Continuity screen mirroring and file transfer.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Droid Bridge requires camera permission for screen capture streaming and device pairing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Droid Bridge requires microphone permission for audio streaming during screen mirroring.</string>
 </dict>
 </plist>
