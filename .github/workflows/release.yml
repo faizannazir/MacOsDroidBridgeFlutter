@@ -97,6 +97,9 @@ jobs:
       - name: Build macOS app
         run: flutter build macos --release --build-name=${{ needs.prepare-release.outputs.version_name }} --build-number=${{ needs.prepare-release.outputs.version_code }}
 
+      - name: Set executable permissions
+        run: chmod -R +x build/macos/Build/Products/Release/droid_bridge.app/Contents/MacOS
+
       - name: Zip macOS app
         run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/droid_bridge.app build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
 

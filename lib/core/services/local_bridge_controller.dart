@@ -547,6 +547,17 @@ class LocalBridgeController extends ChangeNotifier {
 
   Future<void> _handleRequest(HttpRequest request) async {
     try {
+      // Validate Origin header to prevent CSWSH / CSRF attacks from browsers
+      final origin = request.headers.value('origin');
+      if (origin != null && origin.isNotEmpty) {
+        final uri = Uri.tryParse(origin);
+        if (uri != null && uri.host != '127.0.0.1' && uri.host != 'localhost' && !localAddresses.contains(uri.host)) {
+          request.response.statusCode = HttpStatus.forbidden;
+          await request.response.close();
+          return;
+        }
+      }
+
       final code =
           request.uri.queryParameters['code'] ?? request.headers.value('x-pairing-code');
 
