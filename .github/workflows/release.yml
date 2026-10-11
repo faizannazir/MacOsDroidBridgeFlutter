@@ -100,6 +100,12 @@ jobs:
       - name: Set executable permissions
         run: find build/macos/Build/Products/Release -name "*.app" -exec chmod -R +x {}/Contents/MacOS \; || true
 
+      - name: Create macOS DMG installer
+        run: |
+          mkdir -p build/macos/Build/Products/Release/dmg_staging
+          cp -R build/macos/Build/Products/Release/*.app build/macos/Build/Products/Release/dmg_staging/
+          ln -s /Applications build/macos/Build/Products/Release/dmg_staging/Applications
+          hdiutil create -volname "Droid Bridge" -srcfolder build/macos/Build/Products/Release/dmg_staging -ov -format UDZO build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.dmg
       - name: Zip macOS app
         run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/*.app build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
 
@@ -107,7 +113,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}
-          path: build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
+          path: |
+            build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
+            build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.dmg
 
   publish-release:
     needs:
@@ -139,3 +147,4 @@ jobs:
           files: |
             release-assets/droid-bridge-android-${{ needs.prepare-release.outputs.release_tag }}.apk
             release-assets/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
+            release-assets/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.dmg
