@@ -25,6 +25,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   late final LocalBridgeController _controller;
   ContinuityTab _selectedTab = ContinuityTab.mirroring;
+  bool _hideGatekeeperBanner = false;
 
   final TextEditingController _hostController = TextEditingController();
   final TextEditingController _codeController = TextEditingController();
@@ -52,9 +53,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: AnimatedBuilder(
           animation: _controller,
           builder: (context, _) {
+            final isDesktop = _controller.snapshot?.platformRole == 'desktop';
+
             return Column(
               children: [
                 _MacTitleBar(controller: _controller),
+                if (isDesktop && !_hideGatekeeperBanner)
+                  _GatekeeperBanner(
+                    onDismiss: () => setState(() => _hideGatekeeperBanner = true),
+                  ),
                 const Divider(height: 1, color: Color(0x1F2C2C35)),
                 Expanded(
                   child: LayoutBuilder(
@@ -118,6 +125,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
           codeController: _codeController,
         ),
     };
+  }
+}
+
+class _GatekeeperBanner extends StatelessWidget {
+  const _GatekeeperBanner({required this.onDismiss});
+
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF2C2C34),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(CupertinoIcons.shield_fill, color: Color(0xFFFEBC2E), size: 16),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'macOS Gatekeeper Notice: If prompted "Apple could not verify Droid Bridge", go to System Settings -> Privacy & Security -> click "Open Anyway".',
+              style: TextStyle(fontSize: 11, color: Colors.white70),
+            ),
+          ),
+          InkWell(
+            onTap: onDismiss,
+            child: const Icon(CupertinoIcons.xmark, color: Colors.grey, size: 14),
+          ),
+        ],
+      ),
+    );
   }
 }
 

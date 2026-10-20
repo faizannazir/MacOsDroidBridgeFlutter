@@ -104,8 +104,11 @@ jobs:
         run: |
           mkdir -p build/macos/Build/Products/Release/dmg_staging
           cp -R build/macos/Build/Products/Release/*.app build/macos/Build/Products/Release/dmg_staging/
+          cp install.sh build/macos/Build/Products/Release/dmg_staging/
+          chmod +x build/macos/Build/Products/Release/dmg_staging/install.sh
           ln -s /Applications build/macos/Build/Products/Release/dmg_staging/Applications
           hdiutil create -volname "Droid Bridge" -srcfolder build/macos/Build/Products/Release/dmg_staging -ov -format UDZO build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.dmg
+
       - name: Zip macOS app
         run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/*.app build/macos/Build/Products/Release/droid-bridge-macos-${{ needs.prepare-release.outputs.release_tag }}.zip
 

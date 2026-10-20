@@ -13,33 +13,41 @@
 
 ---
 
-## macOS First-Run Notice ("Apple could not verify...")
+## macOS First-Run Guide ("Apple could not verify...")
 
-When downloading the app release from GitHub on macOS, Gatekeeper will show a warning:
-> *"Apple could not verify 'Droid Bridge' is free of malware..."*
+When opening `Droid Bridge.app` for the first time on macOS after downloading from GitHub, macOS Gatekeeper may show:
+> *"Apple could not verify 'Droid Bridge' is free of malware that may harm your Mac..."*
 
 This occurs because open-source releases built on GitHub Actions use ad-hoc local code signing without a paid $99/year Apple Developer notarization certificate.
 
-### How to Open on macOS Sequoia / macOS Sonoma:
+### 🚀 Easy 1-Click Installer Script
+In the downloaded DMG disk image or release folder, double-click or run `./install.sh`:
+```bash
+./install.sh
+```
+This automatically moves `Droid Bridge.app` to `/Applications` and removes the web download quarantine attribute.
 
-#### Option 1: System Settings (Recommended)
+---
+
+### 🛠️ Manual 1-Click Fixes:
+
+#### Option 1: System Settings (Recommended by Apple)
 1. Open **System Settings** on your Mac.
 2. Go to **Privacy & Security**.
 3. Scroll down to the **Security** section.
-4. Click **Open Anyway** next to the notification for Droid Bridge.
-5. Enter your Mac administrator password and confirm.
+4. Click **Open Anyway** next to *Droid Bridge*.
+5. Enter your Mac administrator password and confirm **Open**.
 
-#### Option 2: Finder Right-Click
-1. In Finder, locate `Droid Bridge.app`.
-2. **Control-click** (or Right-click) the app icon and select **Open** from the menu.
-3. Click **Open** in the warning dialog.
+#### Option 2: Finder Control-Click
+1. Open **Finder** and navigate to `Droid Bridge.app` in `/Applications`.
+2. **Control-click** (or Right-click) the app icon and select **Open** from the context menu.
+3. Click **Open** in the confirmation dialog.
 
-#### Option 3: Terminal (Instant Fix)
-Run this single command in Terminal to clear the download quarantine attribute:
+#### Option 3: Terminal Command
+Run this command in Terminal to clear the download quarantine attribute:
 ```bash
 xattr -cr /Applications/"Droid Bridge.app"
 ```
-*(or point to the path of your downloaded `.app` bundle)*
 
 ---
 
@@ -62,4 +70,4 @@ For personal local builds:
 GitHub Actions automatically builds release artifacts on Git commits to `main`:
 - Dynamic semantic versioning (`v1.0.x`) and build numbers.
 - Android release APK.
-- macOS release `.app` ZIP archive with executable permissions.
+- macOS release DMG installer and `.app` ZIP archive with executable permissions and installer script.
