@@ -97,8 +97,10 @@ jobs:
       - name: Build macOS app
         run: flutter build macos --release --build-name=${{ needs.prepare-release.outputs.version_name }} --build-number=${{ needs.prepare-release.outputs.version_code }}
 
-      - name: Set executable permissions
-        run: find build/macos/Build/Products/Release -name "*.app" -exec chmod -R +x {}/Contents/MacOS \; || true
+      - name: Set executable permissions and clear extended attributes
+        run: |
+          find build/macos/Build/Products/Release -name "*.app" -exec chmod -R +x {}/Contents/MacOS \; || true
+          xattr -rc build/macos/Build/Products/Release/*.app || true
 
       - name: Create macOS DMG installer
         run: |
